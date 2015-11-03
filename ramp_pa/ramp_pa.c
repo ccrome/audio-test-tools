@@ -41,7 +41,6 @@ typedef struct {
 	long int capture_callbacks;
 	long int playback_frames;
 	long int playback_callbacks;
-	
 } ramp_t;
 
 typedef struct {
@@ -132,12 +131,11 @@ void ramp_report_with_channel(void *priv)
 	unsigned short int *out = p->playback_data;
 	int fp = (p->playback_data[0]);
 	int fc = (p->capture_data[0]);
-	unsigned latency = ((fp - fc) & 0xFFF);
 	int row = 6;
 	int col = 3;
 	message(row++, col, "Sync Errors    : %10d", p->sync_errors);
 	message(row++, col, "Channel Errors : %10d", p->channel_errors);
-	message(row++, col, "latency        : %10d", latency);
+	message(row++, col, "latency        : %10d", p->latency);
 	message(row++, col, "Frames played  : %10d", p->playback_frames);
 	message(row++, col, "Frames captured: %10d", p->capture_frames);
 	if ((p->sync_errors == 0) &&
@@ -161,12 +159,11 @@ void ramp_report_with_latency(void *priv)
 	unsigned short int *out = p->playback_data;
 	int fp = (p->playback_data[0]);
 	int fc = (p->capture_data[0]);
-	unsigned latency = ((fp - fc) & 0xFFFF);
 	int row = 6;
 	int col = 3;
-	message(row++, col,  "Sync Errors    : %10d", p->sync_errors);
-	message(row++, col,  "Channel Errors : %10d", p->channel_errors);
-	message(row++, col,  "latency        : %10d", latency);
+	message(row++, col, "Sync Errors    : %10d", p->sync_errors);
+	message(row++, col, "Channel Errors : %10d", p->channel_errors);
+	message(row++, col, "latency        : %10d", p->latency);
 	message(row++, col, "Frames played  : %10d", p->playback_frames);
 	message(row++, col, "Frames captured: %10d", p->capture_frames);
 	if ((p->sync_errors == 0) &&
@@ -200,6 +197,7 @@ void ramp_capture_with_channel(unsigned long frames, int channels, const unsigne
 	unsigned channel;
 	short int ramp_rec = p->ramp_record;
 	memcpy(p->capture_data, capture_in, sizeof(*capture_in)*frames*channels);
+	p->latency = (p->playback_data[0] - p->capture_data[0]) & 0xFFF;
 	p->frames = frames;
 	p->channels = channels;
 	int started = p->started;
@@ -246,6 +244,7 @@ void ramp_capture_without_channel(unsigned long frames, int channels, const unsi
 	unsigned channel;
 	short int ramp_rec = p->ramp_record;
 	memcpy(p->capture_data, capture_in, sizeof(*capture_in)*frames*channels);
+	p->latency = (p->playback_data[0] - p->capture_data[0]) & 0xFFFF;
 	p->frames = frames;
 	p->channels = channels;
 	int started = p->started;
