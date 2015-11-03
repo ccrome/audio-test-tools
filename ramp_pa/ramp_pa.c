@@ -1,3 +1,11 @@
+/*
+ * Simple ramp tester for testing linux sound cards.
+ * 
+ * Copyright 2015 Signal Essence, LLC.  All Rights reserved.
+ * 
+ */
+
+
 #include <stdio.h>
 #include <portaudio.h>
 #include <string.h>

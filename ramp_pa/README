@@ -1,0 +1,17 @@
+This is a simple portaudio based ramp tester that tests linux SoC
+sound Tx and Rx capability for bit perfection.
+
+For this to work, your system must be set up like this:
+
+   * Tx and Rx are on the same bus, at the same speed, with the same
+     number of channels in each direction
+   * You must loop back the TDM port's DOUT to DIN
+
+check the help message for all options
+# ./ramp_pa --help
+
+The following test will run the ramp tester for 1000 seconds, on 16
+channels, at 16Hz.
+
+# ./ramp_pa -c 16 -f 16000 -l .1 -t 1000
+
