@@ -15,7 +15,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <curses.h>
-typedef struct {
+struct ramp_opts_t {
 	int channels;          // for now, must be symmetric until we find a better way
 	int input_device_index;
 	int output_device_index;
@@ -26,7 +26,7 @@ typedef struct {
 } ramp_opts_t;
 
 
-typedef struct {
+struct ramp_t {
 	short int ramp;
 	short int ramp_record;
 	long  int sync_errors;
@@ -41,20 +41,22 @@ typedef struct {
 	long int capture_callbacks;
 	long int playback_frames;
 	long int playback_callbacks;
-} ramp_t;
+	struct ramp_opts_t *ramp_opts;
+};
 
-typedef struct {
+struct ramp_private_t {
 	int output_channels;
 	int input_channels;
 	// options
 	int channels;
-	void *(*init)   (unsigned long frames, int channels);
+	void *(*init)   (struct ramp_opts_t *, unsigned long frames, int channels);
 	void (*playback)(unsigned long frames, int channels,       unsigned short *playback_out, void *priv);
 	void (*capture) (unsigned long frames, int channels, const unsigned short *capture_in  , void *priv);
 	void (*report)  (void *priv);
 	void (*free)    (void **priv);
 	void *priv;
-} ramp_private_t;
+	struct ramp_t *ramp;
+};
 
 
 WINDOW *mainwin;
@@ -76,16 +78,17 @@ int caught_ctrl_c = 0;
 void my_handler(int s) {
 	caught_ctrl_c = 1;
 }
-void *ramp_init(unsigned long frames, int channels)
+void *ramp_init(struct ramp_opts_t *opts, unsigned long frames, int channels)
 {
-	ramp_t *ramp = malloc(sizeof(ramp_t));
-	memset(ramp, 0, sizeof(ramp_t));
+	struct ramp_t *ramp = malloc(sizeof(struct ramp_t));
+	memset(ramp, 0, sizeof(struct ramp_t));
 	ramp->ramp = 0;
 	ramp->sync_errors = -1;  // expect 1 sync error upon startup.
 	ramp->channel_errors = 0; // should never get a channel error
 	ramp->ramp_record = 0;  // keep track of the ramp on the input
 	ramp->capture_data  = malloc(sizeof(*ramp->capture_data)*160*frames*channels);
 	ramp->playback_data = malloc(sizeof(*ramp->capture_data)*160*frames*channels);
+	ramp->ramp_opts = opts;
 	return ramp;
 }
 
@@ -93,7 +96,7 @@ void ramp_free(void **priv)
 {
 	
 	if (*priv) {
-		ramp_t *ramp = *priv;
+		struct ramp_t *ramp = *priv;
 		if (ramp->capture_data)
 			free(ramp->capture_data);
 		if (ramp->playback_data) 
@@ -105,75 +108,50 @@ void ramp_free(void **priv)
 
 void print_last_frames(void *priv, int y, int x)
 {
-	ramp_t *p = (ramp_t *)priv;
+	struct ramp_t *p = (struct ramp_t *)priv;
 	int i;
 	char cap[500];
 	char ply[500];
+	char tmp[500];
 	snprintf(cap, 500, "cap: ");
-	for (i = 0; i < p->channels; i++)
-		snprintf(cap, 500, "%s,0x%04x", cap, (unsigned short int)p->capture_data[i]);
-	snprintf(cap, 500, "%s", cap);
-	snprintf(ply, 500, "ply: ");
-	for (i = 0; i < p->channels; i++)
-		snprintf(ply, 500, "%s,0x%04x", ply, (unsigned short int)p->playback_data[i]);
-	snprintf(ply, 500, "%s", ply);
-	message(y, x, cap);
-	message(y+1, x, ply);
-}
-
-
-void ramp_report_with_channel(void *priv)
-{
-	ramp_t *p = (ramp_t *)priv;
-	unsigned long frame;
-	unsigned channel;
-	unsigned short int *in = p->capture_data;
-	unsigned short int *out = p->playback_data;
-	int fp = (p->playback_data[0]);
-	int fc = (p->capture_data[0]);
-	int row = 6;
-	int col = 3;
-	message(row++, col, "Sync Errors    : %10d", p->sync_errors);
-	message(row++, col, "Channel Errors : %10d", p->channel_errors);
-	message(row++, col, "latency        : %10d", p->latency);
-	message(row++, col, "Frames played  : %10d", p->playback_frames);
-	message(row++, col, "Frames captured: %10d", p->capture_frames);
-	if ((p->sync_errors == 0) &&
-	    (p->channel_errors == 0))
-	{
-		message(row++, col, "**********************");
-		message(row++, col, "***Congratulations!***");
-		message(row++, col, "**********************");
-	} else {
-		message(row++, col, "ERROR ERROR ERROR ERROR");
-		message(row++, col, "ERROR ERROR ERROR ERROR");
-		print_last_frames(p, row, col);
+	for (i = 0; i < p->channels; i++) {
+		snprintf(tmp, 500, "%04x,", (unsigned short int)p->capture_data[i]);
+		strcat(cap, tmp);
 	}
+	snprintf(ply, 500, "ply: ");
+	for (i = 0; i < p->channels; i++) {
+		snprintf(tmp, 500, "%04x,", (unsigned short int)p->playback_data[i]);
+		strcat(ply, tmp);
+	}
+	message(y, x, ply);
+	message(y+1, x, cap);
 }
-void ramp_report_with_latency(void *priv)
+
+
+void ramp_report(void *priv)
 {
-	ramp_t *p = (ramp_t *)priv;
+	struct ramp_t *p = (struct ramp_t *)priv;
 	unsigned long frame;
 	unsigned channel;
 	unsigned short int *in = p->capture_data;
 	unsigned short int *out = p->playback_data;
-	int fp = (p->playback_data[0]);
-	int fc = (p->capture_data[0]);
-	int row = 6;
-	int col = 3;
-	message(row++, col, "Sync Errors    : %10d", p->sync_errors);
-	message(row++, col, "Channel Errors : %10d", p->channel_errors);
-	message(row++, col, "latency        : %10d", p->latency);
-	message(row++, col, "Frames played  : %10d", p->playback_frames);
-	message(row++, col, "Frames captured: %10d", p->capture_frames);
+	int y = 6;
+	int x = 3;
+	message(y++, x, "Sync Errors    : %10d", p->sync_errors);
+	if (!(p->ramp_opts))
+		message(y++, x, "Channel Errors : %10d", p->channel_errors);
+	message(y++, x, "latency        : %10d", p->latency);
+	message(y++, x, "Frames played  : %10d", p->playback_frames);
 	if ((p->sync_errors == 0) &&
 	    (p->channel_errors == 0))
 	{
-		message(row++, col, "**********************");
-		message(row++, col, "***Congratulations!***");
-		message(row++, col, "**********************");
+		message(y++, x, "**********************");
+		message(y++, x, "***Congratulations!***");
+		message(y++, x, "**********************");
 	} else {
-		print_last_frames(p, row,  col);
+		message(y++, x, "ERROR ERROR ERROR ERROR");
+		message(y++, x, "ERROR ERROR ERROR ERROR");
+		print_last_frames(p, y, x);
 	}
 }
 
@@ -190,9 +168,9 @@ void conditional_debug()
 	}
 }
 
-void ramp_capture_with_channel(unsigned long frames, int channels, const unsigned short *capture_in, void *priv)
+void ramp_capture(unsigned long frames, int channels, const unsigned short *capture_in, void *priv)
 {
-	ramp_t *p = (ramp_t *)priv;
+	struct ramp_t *p = (struct ramp_t *)priv;
 	unsigned long frame;
 	unsigned channel;
 	short int ramp_rec = p->ramp_record;
@@ -219,59 +197,23 @@ void ramp_capture_with_channel(unsigned long frames, int channels, const unsigne
 	}
 	
 	const unsigned short *cap = capture_in;
+	unsigned int channel_shift;
+	if (!p->ramp_opts->dont_check_channels) {
+		channel_shift = 12;
+	} else {
+		channel_shift = 16;
+	}
+	unsigned ramp_mask    = ((1 << channel_shift)-1) & 0xFFFF;
+	unsigned channel_mask = 0xFFFF & ~ramp_mask;
 	for (frame = 0; frame < frames; frame++) {
 		int in_ramp;
 		for (channel = 0; channel < channels; channel++) {
 			unsigned short int value = *cap++;
-			int in_ch = (value & 0xF000) >> 12;
-			if (in_ch != channel)
+			int in_ch = (value & channel_mask) >> channel_shift;
+			if (in_ch != (channel & (channel_mask >> channel_shift)))
 				p->channel_errors ++;
-			in_ramp = value & 0x0FFF;
-			if (in_ramp != (ramp_rec & 0xFFF)){
-				p->sync_errors++;
-				ramp_rec = in_ramp;
-				conditional_debug();
-			}
-		}
-		ramp_rec = in_ramp+1;
-	}
-	p->ramp_record = ramp_rec;
-}
-void ramp_capture_without_channel(unsigned long frames, int channels, const unsigned short *capture_in, void *priv)
-{
-	ramp_t *p = (ramp_t *)priv;
-	unsigned long frame;
-	unsigned channel;
-	short int ramp_rec = p->ramp_record;
-	memcpy(p->capture_data, capture_in, sizeof(*capture_in)*frames*channels);
-	p->latency = (p->playback_data[0] - p->capture_data[0]) & 0xFFFF;
-	p->frames = frames;
-	p->channels = channels;
-	int started = p->started;
-	p->capture_frames += frames;
-	p->capture_callbacks ++;
-	if(!p->started) {
-		const unsigned short *cap = capture_in;
-		// check to see if we are receiving data yet
-		for (frame = 0; frame < frames; frame++) {
-			for (channel = 0; channel < channels; channel++) {
-				if (*cap++ != 0)
-					started++;
-			}
-		}
-		if (started > 10) { // we've got more than a few data
-			p->started = 1;
-		} 
-		return; // don't process the first block of data
-	}
-	
-	const unsigned short *cap = capture_in;
-	for (frame = 0; frame < frames; frame++) {
-		int in_ramp;
-		for (channel = 0; channel < channels; channel++) {
-			unsigned short int value = *cap++;
-			in_ramp = value & 0xFFFF;
-			if (in_ramp != (ramp_rec & 0xFFFF)){
+			in_ramp = value & ramp_mask;
+			if (in_ramp != (ramp_rec & ramp_mask)){
 				p->sync_errors++;
 				ramp_rec = in_ramp;
 				conditional_debug();
@@ -282,43 +224,32 @@ void ramp_capture_without_channel(unsigned long frames, int channels, const unsi
 	p->ramp_record = ramp_rec;
 }
 
-void ramp_playback_with_channel(unsigned long frames, int channels, unsigned short *playback_out, void *priv)
+void ramp_playback(unsigned long frames, int channels, unsigned short *playback_out, void *priv)
 {
 	unsigned long frame;
 	unsigned channel;
-	ramp_t *p = (ramp_t *)priv;
+	struct ramp_t *p = (struct ramp_t *)priv;
 	short int ramp = p->ramp;
 	unsigned short *playback_out_p = playback_out;
 	p->playback_frames += frames;
 	p->playback_callbacks ++;
+	unsigned channel_shift;
+	if (!p->ramp_opts->dont_check_channels) {
+		channel_shift = 12;
+	} else {
+		channel_shift = 16;
+	}
+	unsigned ramp_mask    = ((1 << channel_shift)-1) & 0xFFFF;
+	unsigned channel_mask = 0xFFFF & ~ramp_mask;
 	for (frame = 0; frame < frames; frame++) {
 		for (channel = 0; channel < channels; channel++) {
-			*playback_out_p++ = (ramp & 0x0FFF) | (channel << 12);
+			*playback_out_p++ = (ramp & ramp_mask) | ((channel << channel_shift) & channel_mask);
 		}
 		ramp++;
 	}
 	p->ramp = ramp;
 	memcpy(p->playback_data, playback_out, sizeof(*playback_out)*frames*channels);
 }
-void ramp_playback_without_channel(unsigned long frames, int channels, unsigned short *playback_out, void *priv)
-{
-	unsigned long frame;
-	unsigned channel;
-	ramp_t *p = (ramp_t *)priv;
-	short int ramp = p->ramp;
-	unsigned short *playback_out_p = playback_out;
-	p->playback_frames += frames;
-	p->playback_callbacks ++;
-	for (frame = 0; frame < frames; frame++) {
-		for (channel = 0; channel < channels; channel++) {
-			*playback_out_p++ = (ramp & 0xFFFF);
-		}
-		ramp++;
-	}
-	p->ramp = ramp;
-	memcpy(p->playback_data, playback_out, sizeof(*playback_out)*frames*channels);
-}
-
 int callback (
 	const void *input,
 	void *output,
@@ -330,7 +261,7 @@ int callback (
 {
 	const short int *in = (short int *)input;
 	short int *out      = (short int *)output;
-	ramp_private_t *p = (ramp_private_t *)userData;
+	struct ramp_private_t *p = (struct ramp_private_t *)userData;
 	if (p->playback)
 		p->playback(frameCount, p->output_channels, out, p->priv);
 	else
@@ -341,7 +272,7 @@ int callback (
 }
 
 error_t parse_opt (int key, char *arg, struct argp_state *state) {
-	ramp_opts_t *opts = state->input;
+	struct ramp_opts_t *opts = state->input;
 	switch (key) {
 	case 'i':
 		opts->input_device_index = atoi(arg);
@@ -375,7 +306,7 @@ error_t parse_opt (int key, char *arg, struct argp_state *state) {
 	return 0;
 }
 
-int parse_arguments(int argc, char *argv[], ramp_opts_t *p)
+int parse_arguments(int argc, char *argv[], struct ramp_opts_t *p)
 {
 	memset(p, 0, sizeof(*p));
 	p->channels = 2;
@@ -418,27 +349,23 @@ int main(int argc, char *argv[])
 	int frames_per_buffer = 160;
 	PaStreamFlags stream_flags = paNoFlag;
 	PaError err;
-	ramp_private_t priv;
-	ramp_opts_t    args;
-	ramp_t ramp;
+	struct ramp_private_t priv;
+	struct ramp_opts_t    args;
+	struct ramp_t ramp;
+	memset(&priv, 0, sizeof(priv));
+	memset(&args, 0, sizeof(args));
+	memset(&ramp, 0, sizeof(ramp));
 	parse_arguments(argc, argv, &args);
 
 	set_ctrl_c_handler();
-	
 	priv.init = ramp_init;
 	priv.free = ramp_free;
-	if (args.dont_check_channels) {
-		priv.playback = ramp_playback_without_channel;
-		priv.capture = ramp_capture_without_channel;
-		priv.report = ramp_report_with_latency;
-	} else {
-		priv.playback = ramp_playback_with_channel;
-		priv.capture = ramp_capture_with_channel;
-		priv.report = ramp_report_with_channel;
-	}
+	priv.playback = ramp_playback;
+	priv.capture = ramp_capture;
+	priv.report = ramp_report;
 	priv.input_channels = args.channels;
 	priv.output_channels = args.channels;
-
+	priv.ramp = &ramp;
 	err = Pa_Initialize();
 	if (err != paNoError) goto error;
 	PaStreamParameters ip = {
@@ -454,7 +381,7 @@ int main(int argc, char *argv[])
 		.suggestedLatency = args.suggested_latency
 	};
 	PaStream *stream;
-	priv.priv = priv.init(frames_per_buffer, args.channels);
+	priv.priv = priv.init(&args, frames_per_buffer, args.channels);
 	err = Pa_OpenStream(&stream, &ip, &op, args.sample_rate,
 			    frames_per_buffer, stream_flags,
 			    callback, &priv);
@@ -471,16 +398,20 @@ int main(int argc, char *argv[])
 	start_color();
 	mvaddstr(1, 4, "Ramp Tester");
 	refresh();
+	long int expected_frames = 0;
+	int update_rate_ms = 100;
 	for (runtime = args.runtime_seconds * 1000;
-	     runtime > 100;
-	     runtime -= 100) {
-		Pa_Sleep(1*100);
+	     runtime > update_rate_ms;
+	     runtime -= update_rate_ms) {
+		Pa_Sleep(1*update_rate_ms);
 		if (caught_ctrl_c) {
 			message(2, 4, "Caught a ctrl-c.  Quitting...");
 			refresh();
 			break;
 		}
 		priv.report(priv.priv);
+		expected_frames += (float)args.sample_rate * update_rate_ms / 1000;
+		message(2, 3, "Expected frames: %10d", expected_frames);
 		refresh();
 	}
 	refresh();
