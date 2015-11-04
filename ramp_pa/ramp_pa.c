@@ -142,7 +142,7 @@ void ramp_report(void *priv)
 	int y = 6;
 	int x = 3;
 	message(y++, x, "Sync Errors    : %10d", p->sync_errors);
-	if (!(p->ramp_opts))
+	if (!(p->ramp_opts->dont_check_channels))
 		message(y++, x, "Channel Errors : %10d", p->channel_errors);
 	message(y++, x, "latency        : %10d", p->latency);
 	message(y++, x, "Frames played  : %10d", p->playback_frames);
