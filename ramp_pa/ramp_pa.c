@@ -30,6 +30,8 @@ struct ramp_t {
 	short int ramp;
 	short int ramp_record;
 	long  int sync_errors;
+	long  int channel_errors_last;
+	long  int sync_errors_last;
 	long  int channel_errors;
 	long  int latency;
 	short int *capture_data;
@@ -151,9 +153,14 @@ void ramp_report(void *priv)
 		message(y++, x, "***Congratulations!***");
 		message(y++, x, "**********************");
 	} else {
-		message(y++, x, "ERROR ERROR ERROR ERROR");
-		message(y++, x, "ERROR ERROR ERROR ERROR");
-		print_last_frames(p, y, x);
+		if ((p->sync_errors != p->sync_errors_last) ||
+		    (p->channel_errors != p->channel_errors_last)) {
+			message(y++, x, "ERROR ERROR ERROR ERROR");
+			message(y++, x, "ERROR ERROR ERROR ERROR");
+			print_last_frames(p, y, x);
+			p->channel_errors_last = p->channel_errors;
+			p->sync_errors_last = p->sync_errors;
+		}
 	}
 }
 
