@@ -23,8 +23,8 @@ struct ramp_opts_t {
 	float sample_rate;
 	float suggested_latency;
 	int dont_check_channels;
+	int blocksize; /* frames_per_buffer */
 } ramp_opts_t;
-
 
 struct ramp_t {
 	short int ramp;
@@ -78,6 +78,8 @@ int caught_ctrl_c = 0;
 void my_handler(int s) {
 	caught_ctrl_c = 1;
 }
+
+
 void *ramp_init(struct ramp_opts_t *opts, unsigned long frames, int channels)
 {
 	struct ramp_t *ramp = malloc(sizeof(struct ramp_t));
@@ -86,8 +88,8 @@ void *ramp_init(struct ramp_opts_t *opts, unsigned long frames, int channels)
 	ramp->sync_errors = -1;  // expect 1 sync error upon startup.
 	ramp->channel_errors = 0; // should never get a channel error
 	ramp->ramp_record = 0;  // keep track of the ramp on the input
-	ramp->capture_data  = malloc(sizeof(*ramp->capture_data)*160*frames*channels);
-	ramp->playback_data = malloc(sizeof(*ramp->capture_data)*160*frames*channels);
+	ramp->capture_data  = malloc(sizeof(*ramp->capture_data)*opts->blocksize*frames*channels);
+	ramp->playback_data = malloc(sizeof(*ramp->capture_data)*opts->blocksize*frames*channels);
 	ramp->ramp_opts = opts;
 	return ramp;
 }
@@ -292,6 +294,9 @@ error_t parse_opt (int key, char *arg, struct argp_state *state) {
 	case 'l':
 		opts->suggested_latency = atof(arg);
 		break;
+	case 'b':
+		opts->blocksize = atoi(arg);
+		break;
 	case 'n':
 		opts->dont_check_channels = 1;
 		break;
@@ -313,12 +318,14 @@ int parse_arguments(int argc, char *argv[], struct ramp_opts_t *p)
 	p->runtime_seconds = 10;
 	p->sample_rate = 48000;
 	p->suggested_latency=0.001;
+	p->blocksize = 160;
 	char doc[] =
 		"%s:  uses portaudio to generate and read a ramp signal and "
 		"verify that the received audio is bit-perfect from what is sent."
 		;
 	const char *args_doc = "";
 	struct argp_option options[] = {
+		{"blocksize",     'b', "FRAMES", 0, "number of frames to be processed per block"},
 		{"input-device",  'i', "INPUT-DEVICE", 0, "input device index"},
 		{"output-device", 'o', "OUTPUT-DEVICE", 0, "output device index"},
 		{"channels",      'c', "CHANNELS", 0, "# channels for in and out"},
@@ -346,7 +353,6 @@ void set_ctrl_c_handler()
 }
 int main(int argc, char *argv[])
 {
-	int frames_per_buffer = 160;
 	PaStreamFlags stream_flags = paNoFlag;
 	PaError err;
 	struct ramp_private_t priv;
@@ -381,9 +387,9 @@ int main(int argc, char *argv[])
 		.suggestedLatency = args.suggested_latency
 	};
 	PaStream *stream;
-	priv.priv = priv.init(&args, frames_per_buffer, args.channels);
+	priv.priv = priv.init(&args, args.blocksize, args.channels);
 	err = Pa_OpenStream(&stream, &ip, &op, args.sample_rate,
-			    frames_per_buffer, stream_flags,
+			    args.blocksize, stream_flags,
 			    callback, &priv);
 	if (err != paNoError) goto error;
 	
