@@ -8,6 +8,7 @@
 
 #include <stdio.h>
 #include <portaudio.h>
+#include <pa_linux_alsa.h>
 #include <string.h>
 #include <argp.h>
 #include <stdlib.h>
@@ -24,6 +25,7 @@ struct ramp_opts_t {
 	float suggested_latency;
 	int dont_check_channels;
 	int blocksize; /* frames_per_buffer */
+	int alsa_periods;
 } ramp_opts_t;
 
 struct ramp_t {
@@ -199,7 +201,7 @@ void ramp_capture(unsigned long frames, int channels, const unsigned short *capt
 					started++;
 			}
 		}
-		if (started > 10) { // we've got more than a few data
+		if (started > 100) { // we've got more than a few data
 			p->started = 1;
 		} 
 		return; // don't process the first block of data
@@ -286,6 +288,9 @@ error_t parse_opt (int key, char *arg, struct argp_state *state) {
 	case 'i':
 		opts->input_device_index = atoi(arg);
 		break;
+	case 'p':
+		opts->alsa_periods = atoi(arg);
+		break;
 	case 'o':
 		opts->output_device_index = atoi(arg);
 		break;
@@ -326,12 +331,14 @@ int parse_arguments(int argc, char *argv[], struct ramp_opts_t *p)
 	p->sample_rate = 48000;
 	p->suggested_latency=0.001;
 	p->blocksize = 160;
+	p->alsa_periods = 4;
 	char doc[] =
 		"%s:  uses portaudio to generate and read a ramp signal and "
 		"verify that the received audio is bit-perfect from what is sent."
 		;
 	const char *args_doc = "";
 	struct argp_option options[] = {
+		{"periods",       'p', "PERIODS", 0, "number of ALSA DMA periods, default is 4"},
 		{"blocksize",     'b', "FRAMES", 0, "number of frames to be processed per block"},
 		{"input-device",  'i', "INPUT-DEVICE", 0, "input device index"},
 		{"output-device", 'o', "OUTPUT-DEVICE", 0, "output device index"},
@@ -381,6 +388,10 @@ int main(int argc, char *argv[])
 	priv.ramp = &ramp;
 	err = Pa_Initialize();
 	if (err != paNoError) goto error;
+
+	err = PaAlsa_SetNumPeriods(args.alsa_periods);
+	if (err != paNoError) goto error;
+
 	PaStreamParameters ip = {
 		.device = args.input_device_index,
 		.channelCount = priv.input_channels,
@@ -395,12 +406,16 @@ int main(int argc, char *argv[])
 	};
 	PaStream *stream;
 	priv.priv = priv.init(&args, args.blocksize, args.channels);
+
+
 	err = Pa_OpenStream(&stream, &ip, &op, args.sample_rate,
 			    args.blocksize, stream_flags,
 			    callback, &priv);
 	if (err != paNoError) goto error;
 	
-	Pa_Sleep(1*500);
+	err = PaAlsa_EnableRealtimeScheduling(stream, true);
+	if (err != paNoError) goto error;
+
 	Pa_StartStream(stream);
 	int i;
 	float runtime;
